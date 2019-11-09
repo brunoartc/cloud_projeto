@@ -1,0 +1,2 @@
+*.pem
+openvpn_clients/**

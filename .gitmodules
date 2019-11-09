@@ -1,0 +1,9 @@
+[submodule "cloud_database"]
+	path = cloud_database
+	url = https://github.com/brunoartc/cloud_database
+[submodule "cloud_serverless"]
+	path = cloud_serverless
+	url = https://github.com/brunoartc/cloud_serverless
+[submodule "openvpn-init-script"]
+	path = openvpn-init-script
+	url = https://github.com/brunoartc/openvpn-init-script
