@@ -21,6 +21,48 @@ def createKey():
     with open('key.pem','w') as file:
         file.write(KeyPairOut)
 
+def createLoadBalancer():
+    client = boto3.client('elb')
+    response = client.create_load_balancer(
+        LoadBalancerName='LoadBalancerToranjaScript',
+        Listeners=[
+            {
+                'Protocol': 'HTTP',
+                'LoadBalancerPort': 80,
+                'InstanceProtocol': 'HTTP',
+                'InstancePort': 5000,
+            }
+        ],
+        AvailabilityZones=[
+            'us-east-2', 'us-east-1', 'us-west-1', 'us-west-2'
+        ],
+        SecurityGroups=[
+            'ToranjaSecurity',
+        ],
+        Tags=[
+            {
+                'Owner': 'Bruno'
+            },
+        ]
+    )
+    return response
+def createAutoScale(id):
+    client = boto3.client('autoscaling')
+    response = client.create_auto_scaling_group(
+        AutoScalingGroupName='ToranjasScaling',
+
+        InstanceId=id,
+        MinSize=1,
+        MaxSize=10,
+        AvailabilityZones=[
+            'us-east-2', 'us-east-1', 'us-west-1', 'us-west-2'
+        ],
+        LoadBalancerNames=[
+            'LoadBalancerToranjaScript',
+        ]
+    )
+    return response
+
 
 def createInstance(userdata = None, type = 'default'):
 
@@ -181,6 +223,8 @@ SFTP_script(openvpn_ip, 1, ["/home/ubuntu/openvpn/clients/database.ovpn", "/home
 startVpnSerrion([database_ip, serverless_ip], ["./openvpn_clients/database.ovpn", "./openvpn_clients/serverless.ovpn"])
 
 
+#createLoadBalancer()
+#createAutoScale(instance_serverless)
 
 
 
