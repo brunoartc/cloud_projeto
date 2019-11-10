@@ -106,7 +106,7 @@ def checkState(id):
 
 def checkServer(ip):
     if (VL > 2):
-        print("Check.    checking server on ... " + ip, end="")
+        print("Check.    checking server on: " + ip, end="")
     try:
         r = requests.get(url = "http://" + ip)
     except:
@@ -118,7 +118,7 @@ def checkServer(ip):
         except:
             r = None
         time.sleep(5)
-    print("Done.     server up on " + ip)
+    print("\nDone.     server up on " + ip)
     return 
     
 
@@ -131,14 +131,15 @@ def SFTP_script(ip, dire, origi, dest):
     sftp = SFTPClient.from_transport(t)
     
     if (dire == 1):
-        if (VL > 4):
-            print("Get.  Getting files(" + origi + ") from " + ip)
+        
         for i in range(len(dest)):
+            if (VL > 4):
+                print("Get.  Getting files(" + origi[i] + ") from " + ip)
             sftp.get(origi[i], dest[i])
     else:
-        if (VL > 4):
-            print("Send.     Sending files(" + origi + ") to " + ip)
         for i in range(len(dest)):
+            if (VL > 4):
+                print("Send.     Sending files(" + origi[i] + ") to " + ip)
             sftp.put(origi[i], dest[i])
 
 def startVpnSerrion(ip, file):
