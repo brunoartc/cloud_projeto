@@ -4,6 +4,7 @@ import time
 import requests
 from paramiko import SSHClient, SFTPClient
 import paramiko
+from botocore.exceptions import ClientError
 
 VL = 5
 
@@ -21,7 +22,7 @@ def createKey():
     with open('key.pem','w') as file:
         file.write(KeyPairOut)
 
-def createLoadBalancer():
+def createLoadBalancer(SecurityGroup):
     client = boto3.client('elb')
     response = client.create_load_balancer(
         LoadBalancerName='LoadBalancerToranjaScript',
@@ -34,34 +35,65 @@ def createLoadBalancer():
             }
         ],
         AvailabilityZones=[
-            'us-east-2', 'us-east-1', 'us-west-1', 'us-west-2'
+            'us-east-1a','us-east-1b','us-east-1c', 'us-east-1e', 'us-east-1f', 'us-east-1d'
         ],
-        SecurityGroups=[
-            'ToranjaSecurity',
-        ],
+        SecurityGroups=SecurityGroup,
         Tags=[
             {
-                'Owner': 'Bruno'
+                'Key':'Owner',
+                'Value': 'Bruno'
             },
         ]
     )
     return response
-def createAutoScale(id):
+
+
+def getAvaliabilityZones():
+    client = boto3.client('ec2')
+    return client.describe_availability_zones()
+def createAutoScale(Instance_id):
     client = boto3.client('autoscaling')
     response = client.create_auto_scaling_group(
         AutoScalingGroupName='ToranjasScaling',
-
-        InstanceId=id,
+        InstanceId=Instance_id,
         MinSize=1,
         MaxSize=10,
-        AvailabilityZones=[
-            'us-east-2', 'us-east-1', 'us-west-1', 'us-west-2'
-        ],
+        HealthCheckGracePeriod=300,
         LoadBalancerNames=[
             'LoadBalancerToranjaScript',
         ]
     )
     return response
+
+
+def createSecurityGroup(name = 'default', ports = [22]):
+    ec2 = boto3.client('ec2')
+    rules = []
+    for i in ports:
+        rules.append({'IpProtocol': 'tcp',
+                'FromPort': i,
+                'ToPort': i,
+                'IpRanges': [{'CidrIp': '0.0.0.0/0'}]})
+
+
+    response = ec2.describe_vpcs()
+    vpc_id = response.get('Vpcs', [{}])[0].get('VpcId', '')
+
+    try:
+        response = ec2.create_security_group(GroupName=name,
+                                            VpcId=vpc_id,
+                                            Description="Created by toranjascript")
+        security_group_id = response['GroupId']
+        print('Security Group Created %s in vpc %s.' % (security_group_id, vpc_id))
+
+        data = ec2.authorize_security_group_ingress(
+            GroupId=security_group_id,
+            IpPermissions=rules)
+        print('Ingress Successfully Set %s' % data)
+    except ClientError as e:
+        print(e)
+        return e
+    return security_group_id
 
 
 def createInstance(userdata = None, type = 'default'):
@@ -192,39 +224,101 @@ def startVpnSerrion(ip, file):
         client = SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         client.connect(ip[i], port=22, username='ubuntu', password=None, pkey=None, key_filename='key.pem', look_for_keys=True)
+        client.exec_command("openvpn" ) #TODO: check openvpn, separete in a external script, configure init.d script
         client.exec_command("sudo tmux new -d -s vpn 'openvpn --config /home/ubuntu/openvpn_client.conf;'" )
+        client.exec_command("sudo cp /var/lib/cloud/instances/*/user-data.txt /home/ubuntu/user-data.txt;" )
+        client.exec_command("echo \' \' >> /home/ubuntu/user-data.txt;" )
+        client.exec_command("echo \'echo \"' >> /home/ubuntu/user-data.txt;" )
+        client.exec_command("cat /home/ubuntu/openvpn_client.conf >> /home/ubuntu/user-data.txt;" )
+        client.exec_command("echo \'\" >> openvpn.config\' >> /home/ubuntu/user-data.txt;" )
+        
         if (VL > 3):
             print("Done.     VPN session started on " + ip[i])
+
+
+def createCloudInitWithOpenVpn(customCommands = [], outName = "custom_cloud_init.sh", openvpnFile="openvpn_clients/serverless.ovpn", inName = None ):
+    if (VL > 3):
+            print("Start.    Creating cloud-init file for " + openvpnFile)
+    needAppend=[]
+    if (inName != None):
+        with open(inName, 'r') as file:
+            for line in file:
+                needAppend.append(line)
+    if (len (customCommands)!=0):
+        needAppend.append('#!/bin/bash\n')
+        for i in customCommands:
+            needAppend.append(i)
+    needAppend.append("\n")
+    needAppend.append("echo \"")
+
+    with open(openvpnFile, 'r') as file:
+        for line in file:
+            needAppend.append(line)
+
+    needAppend.append("\" >> /home/ubuntu/openvpn.config")
+    needAppend.append("\nsudo tmux new -d -s vpn 'openvpn --config /home/ubuntu/openvpn.config;'")
+
+    with open(outName, 'w') as file:
+        for line in needAppend:
+            file.write(line)
+
+    if (VL > 3):
+            print("Done.    Done cloud-init file for " + openvpnFile + " saved as " + outName)
+    return outName
+
+    
 
 
 
 #createKey()
 
 
+
+
 openvpn_ip, instance_openvpn = startAndGetIp('''#!/bin/bash
     wget -O - https://raw.githubusercontent.com/brunoartc/openvpn-init-script/master/openvpn.sh | bash''', 'vpn')
 
 
-serverless_ip, instance_serverless = startAndGetIp('''#!/bin/bash
-wget -O - https://raw.githubusercontent.com/brunoartc/cloud_serverless/master/ec2.sh | bash''', 'serverless')
-
-database_ip, instance_database = startAndGetIp('''#!/bin/bash
-wget -O - https://raw.githubusercontent.com/brunoartc/cloud_database/master/ec2.sh | bash''', 'database')
-
 checkServer(openvpn_ip)
 
-checkState(instance_database)
-checkState(instance_serverless)
+#checkState(instance_database)
+#checkState(instance_serverless)
 
 
 SFTP_script(openvpn_ip, 1, ["/home/ubuntu/openvpn/clients/database.ovpn", "/home/ubuntu/openvpn/clients/serverless.ovpn"], ["./openvpn_clients/database.ovpn", "./openvpn_clients/serverless.ovpn"])
 
+createCloudInitWithOpenVpn(customCommands = ["wget -O - https://raw.githubusercontent.com/brunoartc/cloud_database/master/ec2.sh | bash"], openvpnFile = "openvpn_clients/database.ovpn")
 
-startVpnSerrion([database_ip, serverless_ip], ["./openvpn_clients/database.ovpn", "./openvpn_clients/serverless.ovpn"])
+with open("custom_cloud_init.sh", 'r') as file:
+    userdata = file.readlines()
+
+database_ip, instance_database = startAndGetIp("".join(userdata), 'database')
 
 
-#createLoadBalancer()
-#createAutoScale(instance_serverless)
+createCloudInitWithOpenVpn(customCommands = ["wget -O - https://raw.githubusercontent.com/brunoartc/cloud_serverless/master/ec2.sh | bash"], openvpnFile="openvpn_clients/serverless.ovpn")
+
+with open("custom_cloud_init.sh", 'r') as file:
+    userdata = file.readlines()
+
+serverless_ip, instance_serverless = startAndGetIp("".join(userdata), 'serverless')
+
+
+
+
+
+#todo custom script cloud init
+
+
+
+#startVpnSerrion([database_ip, serverless_ip], ["./openvpn_clients/database.ovpn", "./openvpn_clients/serverless.ovpn"])
+
+#print(instance_serverless, serverless_ip)
+#security_group_id = createSecurityGroup("teste_toranja1", [5000, 80, 22])
+#print(getAvaliabilityZones())
+#print(createLoadBalancer(['sg-0020cc23e867f16b8'])) #security group
+#createAutoScale('i-04b6ebf030fc00117')
+
+
 
 
 
