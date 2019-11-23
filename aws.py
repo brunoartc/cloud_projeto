@@ -7,6 +7,7 @@ import paramiko
 from botocore.exceptions import ClientError
 
 VL = 5
+deleteEnable = False
 
 global ec2
 ec2 = boto3.resource('ec2')
@@ -22,10 +23,14 @@ def createKey():
     with open('key.pem','w') as file:
         file.write(KeyPairOut)
 
-def createLoadBalancer(SecurityGroup):
+def createLoadBalancer(SecurityGroup, name = 'LoadBalancerToranjaScript'):
     client = boto3.client('elb')
+    response_deleted = client.delete_load_balancer(
+        LoadBalancerName=name
+    )
+
     response = client.create_load_balancer(
-        LoadBalancerName='LoadBalancerToranjaScript',
+        LoadBalancerName=name,
         Listeners=[
             {
                 'Protocol': 'HTTP',
@@ -45,22 +50,22 @@ def createLoadBalancer(SecurityGroup):
             },
         ]
     )
-    return response
+    return name, response
 
 
 def getAvaliabilityZones():
     client = boto3.client('ec2')
     return client.describe_availability_zones()
-def createAutoScale(Instance_id):
+def createAutoScale(Instance_id, name='ToranjasScaling', name_load = 'LoadBalancerToranjaScript'):
     client = boto3.client('autoscaling')
     response = client.create_auto_scaling_group(
-        AutoScalingGroupName='ToranjasScaling',
+        AutoScalingGroupName=name,
         InstanceId=Instance_id,
         MinSize=1,
         MaxSize=10,
         HealthCheckGracePeriod=300,
         LoadBalancerNames=[
-            'LoadBalancerToranjaScript',
+            name_load,
         ]
     )
     return response
@@ -96,7 +101,7 @@ def createSecurityGroup(name = 'default', ports = [22]):
     return security_group_id
 
 
-def createInstance(userdata = None, type = 'default'):
+def createInstance(userdata = None, type = 'default', security_group = 'falafou'):
 
     ec2 = boto3.resource('ec2')
 
@@ -130,6 +135,7 @@ def createInstance(userdata = None, type = 'default'):
             MaxCount=1,
             InstanceType='t2.micro',
             KeyName='toranja-script',
+            SecurityGroups=[security_group],
             UserData=userdata,
             TagSpecifications=[
             {
@@ -154,15 +160,16 @@ def createInstance(userdata = None, type = 'default'):
 
 
 
-def startAndGetIp(cloud_init, tag):
+def startAndGetIp(cloud_init, tag, security_group):
     if (VL > 0):
         print("Start.    launching instance ... " + tag)
-    instances = createInstance(cloud_init, tag)
+    instances = createInstance(cloud_init, tag, security_group)
     response = ec2.Instance(instances[0][1])
     while (response.public_ip_address == None):
         response = ec2.Instance(instances[0][1])
     if (VL > 2):
-        print("Info.     Instance ip : " + response.public_ip_address)
+        print("Info.     Instance ip :  " + response.public_ip_address)
+        print("Info.     Instance id :  " + instances[0][1])
     ip = response.public_ip_address
     return ip, instances[0][1]
 
@@ -180,7 +187,8 @@ def checkState(id):
 
 def checkServer(ip):
     if (VL > 2):
-        print("Check.    checking server on: " + ip, end="")
+        print("Info.     generating OpenVpn configs")
+        print("Check.    waiting for VPN on: " + ip, end="")
     try:
         r = requests.get(url = "http://" + ip)
     except:
@@ -235,6 +243,31 @@ def startVpnSerrion(ip, file):
         if (VL > 3):
             print("Done.     VPN session started on " + ip[i])
 
+def deleteAutoScalingLaunchConfig(name = 'ToranjasScaling'):
+    client = boto3.client('autoscaling')
+    
+    
+    try:
+        response = client.delete_auto_scaling_group(
+            AutoScalingGroupName=name,
+            ForceDelete=True
+        )
+    except:
+        response = ""
+        pass
+    
+    try:
+        response_launch_config = client.delete_launch_configuration(
+            LaunchConfigurationName='ToranjasScaling'
+        )
+    except:
+        response_launch_config = ""
+        pass
+
+    
+    
+    return response, response_launch_config
+
 
 def createCloudInitWithOpenVpn(customCommands = [], outName = "custom_cloud_init.sh", openvpnFile="openvpn_clients/serverless.ovpn", inName = None ):
     if (VL > 3):
@@ -267,22 +300,38 @@ def createCloudInitWithOpenVpn(customCommands = [], outName = "custom_cloud_init
     return outName
 
     
+def getSecurityGroupId(name = 'autoscaling'):
+    client = boto3.client('ec2')
+    response = client.describe_security_groups(
+        GroupNames=[
+            name,
+        ]
+    )
+
+    return response
 
 
+try:
+    createKey()
+except:
+    print("Already have a key toranja-script, delete manually if needed")
 
-#createKey()
+if True:
+    deleteAutoScalingLaunchConfig()
 
-
+try:
+    security_group_id = createSecurityGroup('vpn', [22, 80, 1194])
+except:
+    pass
 
 
 openvpn_ip, instance_openvpn = startAndGetIp('''#!/bin/bash
-    wget -O - https://raw.githubusercontent.com/brunoartc/openvpn-init-script/master/openvpn.sh | bash''', 'vpn')
+    wget -O - https://raw.githubusercontent.com/brunoartc/openvpn-init-script/master/openvpn.sh | bash''', 'vpn', 'vpn')
 
 
 checkServer(openvpn_ip)
 
-#checkState(instance_database)
-#checkState(instance_serverless)
+
 
 
 SFTP_script(openvpn_ip, 1, ["/home/ubuntu/openvpn/clients/database.ovpn", "/home/ubuntu/openvpn/clients/serverless.ovpn"], ["./openvpn_clients/database.ovpn", "./openvpn_clients/serverless.ovpn"])
@@ -292,7 +341,12 @@ createCloudInitWithOpenVpn(customCommands = ["wget -O - https://raw.githubuserco
 with open("custom_cloud_init.sh", 'r') as file:
     userdata = file.readlines()
 
-database_ip, instance_database = startAndGetIp("".join(userdata), 'database')
+try:
+    security_group_id = createSecurityGroup('others', [22, 5000])
+except:
+    pass
+
+database_ip, instance_database = startAndGetIp("".join(userdata), 'database', 'others')
 
 
 createCloudInitWithOpenVpn(customCommands = ["wget -O - https://raw.githubusercontent.com/brunoartc/cloud_serverless/master/ec2.sh | bash"], openvpnFile="openvpn_clients/serverless.ovpn")
@@ -300,24 +354,34 @@ createCloudInitWithOpenVpn(customCommands = ["wget -O - https://raw.githubuserco
 with open("custom_cloud_init.sh", 'r') as file:
     userdata = file.readlines()
 
-serverless_ip, instance_serverless = startAndGetIp("".join(userdata), 'serverless')
+serverless_ip, instance_serverless = startAndGetIp("".join(userdata), 'serverless', 'others')
+
+checkState(instance_database)
+checkState(instance_serverless)
+
+
+try:
+    security_group_id = createSecurityGroup('autoscaling', [80, 22, 5000])
+except:
+    pass
+
+try:
+    security_group_id = getSecurityGroupId()['SecurityGroups'][0]['GroupId']
+except:
+    pass
+
+loadbalancername, loadbalancerinfo = createLoadBalancer([security_group_id])
 
 
 
+autoscale = createAutoScale(instance_serverless)
 
-
-#todo custom script cloud init
-
-
-
-#startVpnSerrion([database_ip, serverless_ip], ["./openvpn_clients/database.ovpn", "./openvpn_clients/serverless.ovpn"])
-
-#print(instance_serverless, serverless_ip)
-#security_group_id = createSecurityGroup("teste_toranja1", [5000, 80, 22])
-#print(getAvaliabilityZones())
-#print(createLoadBalancer(['sg-0020cc23e867f16b8'])) #security group
-#createAutoScale('i-04b6ebf030fc00117')
-
+print("\n\n\n\n\n-------  INFO SUMMARY -------\n\n")
+print("-------  INSTANCES    -------\n")
+print("TYPE=\tDATABASE\tIP=" + database_ip + "\t\tID="+instance_database)
+print("TYPE=\tSERVERLESS\ttIP=" + serverless_ip + "\t\tID="+instance_serverless)
+print("TYPE=\tVPN\t\tIP=" + openvpn_ip + "\t\tID="+instance_openvpn)
+print("TYPE=\tLOADBALANCER\tDNS=\t", loadbalancerinfo['DNSName'])
 
 
 
