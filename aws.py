@@ -382,7 +382,7 @@ print("TYPE=\tDATABASE\tIP=" + database_ip + "\t\tID="+instance_database)
 print("TYPE=\tSERVERLESS\ttIP=" + serverless_ip + "\t\tID="+instance_serverless)
 print("TYPE=\tVPN\t\tIP=" + openvpn_ip + "\t\tID="+instance_openvpn)
 print("TYPE=\tLOADBALANCER\tDNS=\t", loadbalancerinfo['DNSName'])
-
+print("Info.    access system using loadbalancer dns port 80 on /todo or in SERVERLESS ip port 5000 on /todo")
 
 
 

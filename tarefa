@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+import sys
+import os
+import ast
+import requests
+
+
+valid_args = ["adicionar", "listar", "buscar", "apagar", "atualizar"]
+
+def main(args):
+    server = os.environ.get('SERVER')
+    try:
+        args[1]
+    except:
+        print("please type an option or type help for help")
+        quit()
+                
+    if (args[1] in valid_args):
+        if (args[1] == "listar"):
+            r = requests.get(url = server + "/Tarefa") 
+        elif (args[1] == "buscar"):
+            r = requests.get(url = (server + "/Tarefa/" + args[2])) 
+        elif (args[1] == "apagar"):
+            r = requests.delete(url = (server + "/Tarefa/" + args[2]))
+        elif (args[1] == "adicionar"):
+            try:
+                args_params = ast.literal_eval(args[2])
+            except:
+                print("Error arg2 not a list in format like \"[ name, description]\"") #TODO: ask for ID
+                quit()
+            
+            data = {"name": args_params[0], "description": args_params[1]}
+            r = requests.post(url = server + "/Tarefa", data = data) 
+        elif (args[1] == "atualizar"):
+            try:
+                args_params = ast.literal_eval(args[2])
+            except:
+                print("Error arg2 not a list in format like \"[ name, description]\"") #TODO: ask for ID
+                quit()
+            
+            data = {"name": args_params[0], "description": args_params[1]}
+        print(r.json())
+    elif (args[1] == 'help'):
+        print("""
+tarefa
+    [adicionar PARAMS<2>]
+    [atualizar ID PARAMS<2>] 
+    [buscar ID]
+    [deletar ID]
+    [listar]
+        """)
+    else:
+        print("Error unknown option type tarefa help for help")
+        
+        
+    
+    
+if __name__ == "__main__" :
+        main(sys.argv)
